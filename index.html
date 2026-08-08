@@ -664,10 +664,28 @@
     els.searchBtn.disabled = false;
   }
 
+  // Rank by how actionable a hit looks, not by which book it's from — testing
+  // against real queries (e.g. "肝病") showed foundational classics like
+  // 傷寒論／金匱要略 often only mention a term in passing theory (pulse
+  // prognosis, dietary taboos), while case-record works are full of concrete
+  // pattern → formula reasoning. Book identity is a poor proxy for relevance;
+  // presence of prescription language is a much better one.
+  const TREATMENT_PHRASE_RE = /主之|議用|治以|宜用|方用|急投|投以/;
+  const FORMULA_MENTION_RE = /[湯丸散飲煎丹膏][，。：、）]|[湯丸散飲煎丹膏]方/;
+  function clinicalScore(it) {
+    if (it.formula) return 3;
+    if (TREATMENT_PHRASE_RE.test(it.text)) return 2;
+    if (FORMULA_MENTION_RE.test(it.text)) return 1;
+    return 0;
+  }
+  function rankExact(items) {
+    return items.slice().sort((a, b) => clinicalScore(b) - clinicalScore(a));
+  }
+
   function renderResults(query, exact, loose, truncatedBooks, partial) {
     if (partial) {
       if (exact.length === 0) { els.resultsWrap.innerHTML = ""; return; }
-      els.resultsWrap.innerHTML = renderGroup(exact.slice().sort((a, b) => (b.formula - a.formula)).slice(0, MAX_RESULTS), false);
+      els.resultsWrap.innerHTML = renderGroup(rankExact(exact).slice(0, MAX_RESULTS), false);
       return;
     }
     if (exact.length === 0 && loose.length === 0) {
@@ -677,8 +695,8 @@
     }
     els.statusLine.innerHTML = `精確符合 <b>${exact.length}</b> 段${loose.length ? `，相關段落 <b>${loose.length}</b> 段` : ""}${truncatedBooks ? "（候選典籍過多，僅搜尋前 " + MAX_BOOKS_FETCH + " 部，建議縮小關鍵字）" : ""}`;
 
-    // formula hits first — most directly actionable for a doctor
-    const sortedExact = exact.slice().sort((a, b) => (b.formula - a.formula));
+    // most actionable (formula > treatment language > formula-name mention > plain mention) first
+    const sortedExact = rankExact(exact);
 
     let html = "";
     if (sortedExact.length) {
@@ -705,6 +723,7 @@
         const link = readLink(it.bid, it.paraIdx);
         html += `<div class="result-item ${isLoose ? "loose" : ""}">`;
         if (it.formula) html += `<span class="formula-tag">方劑</span>`;
+        else if (!isLoose && TREATMENT_PHRASE_RE.test(it.text)) html += `<span class="formula-tag">含治法</span>`;
         if (it.via) html += `<span class="formula-tag" style="color:var(--accent-strong);border-color:var(--accent-strong);">同義詞：${escapeHtml(it.via)} → ${escapeHtml(it.term)}</span>`;
         if (it.chapter) html += `<div class="chapter">${escapeHtml(it.chapter)}</div>`;
         html += `<div class="excerpt serif">${isLoose ? escapeHtml(it.text) : highlight(it.text, it.term)}</div>`;
