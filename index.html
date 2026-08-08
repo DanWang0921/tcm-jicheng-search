@@ -224,7 +224,7 @@
     <div class="hero">
       <div class="eyebrow">中醫古籍全文檢索</div>
       <h1 class="serif">中醫古籍檢索</h1>
-      <p>收錄內經、傷寒金匱、溫病、本草、方劑、醫案醫論等 73 部核心典籍，共 21 萬餘段原文。輸入症狀描述或方劑名稱，直接在本站閱讀對應段落全文。</p>
+      <p>收錄內經、傷寒金匱、溫病、本草、方劑、醫案醫論等 73 部核心典籍，共 21 萬餘段原文。輸入症狀描述或方劑名稱，直接在本站閱讀對應段落全文；現代病名（如「焦慮」「更年期」）會自動對照古籍病名一併查詢。</p>
     </div>
 
     <div class="search-box">
@@ -235,9 +235,9 @@
       <span>試試：</span>
       <span class="example">大黃蟅蟲丸</span>
       <span class="example">肌膚甲錯</span>
-      <span class="example">怕冷手腳冰冷</span>
-      <span class="example">咳嗽痰多</span>
-      <span class="example">崩漏</span>
+      <span class="example">自律神經失調</span>
+      <span class="example">焦慮</span>
+      <span class="example">更年期</span>
     </div>
 
     <div class="status-line" id="statusLine"></div>
@@ -278,15 +278,93 @@
   const BOOK_BASE = "https://jicheng.tw/tcm/book/";
   const CJK_RE = /[㐀-鿿豈-﫿]/;
   const MAX_RESULTS = 250;
-  const MAX_BOOKS_FETCH = 40;
+  const MAX_BOOKS_FETCH = 60;
   // common modern/simplified variant -> classical form used in these editions
   const VARIANT_MAP = { "蟅": "䗪", "术": "朮", "芪": "耆", "曲": "麴", "泻": "瀉" };
   function normalizeQuery(s) {
     return [...s].map(ch => VARIANT_MAP[ch] || ch).join("");
   }
 
+  // modern symptom/disease name -> classical TCM term(s), used to expand a search
+  // beyond the literal query so results aren't limited to modern vocabulary that
+  // never appears in classical texts. Not exhaustive — extend as gaps are found.
+  const SYNONYM_MAP = {
+    "自律神經失調": ["鬱證", "臟躁", "驚悸"],
+    "焦慮": ["驚悸", "怔忡", "臟躁"],
+    "憂鬱": ["鬱證", "臟躁", "百合病"],
+    "憂鬱症": ["鬱證", "臟躁"],
+    "失眠": ["不寐", "不得臥", "不得眠"],
+    "更年期": ["經斷前後諸證", "臟躁"],
+    "胃食道逆流": ["吞酸", "嘈雜", "反胃"],
+    "胃脹氣": ["痞滿", "腹脹"],
+    "消化不良": ["痞滿", "食積"],
+    "便秘": ["大便難", "脾約"],
+    "腹瀉": ["泄瀉", "下利"],
+    "偏頭痛": ["頭風", "偏頭風"],
+    "頭痛": ["頭風"],
+    "過敏性鼻炎": ["鼻鼽", "鼻淵"],
+    "異位性皮膚炎": ["濕瘡", "血風瘡"],
+    "濕疹": ["濕瘡", "血風瘡"],
+    "蕁麻疹": ["癮疹", "風疹塊"],
+    "甲狀腺功能亢進": ["癭病", "癭氣"],
+    "甲狀腺功能低下": ["虛勞", "陽虛"],
+    "退化性關節炎": ["痺症", "骨痺", "歷節"],
+    "類風濕性關節炎": ["歷節風", "尪痺"],
+    "痛風": ["白虎歷節"],
+    "糖尿病": ["消渴"],
+    "高血壓": ["眩暈", "頭風"],
+    "心悸": ["怔忡"],
+    "慢性疲勞": ["虛勞", "勞倦"],
+    "疲勞": ["虛勞", "勞倦"],
+    "氣喘": ["哮病", "喘證"],
+    "支氣管炎": ["痰飲"],
+    "慢性腎臟病": ["水腫", "關格"],
+    "攝護腺肥大": ["癃閉", "淋證"],
+    "前列腺肥大": ["癃閉", "淋證"],
+    "頻尿": ["淋證", "遺尿"],
+    "陽痿": ["陽事不舉"],
+    "不孕症": ["不孕", "無子"],
+    "月經不調": ["經水不調"],
+    "痛經": ["經痛"],
+    "異常子宮出血": ["崩漏"],
+    "白帶": ["帶下"],
+    "掉髮": ["脫髮", "髮墮"],
+    "落髮": ["脫髮", "髮墮"],
+    "暈眩": ["眩暈"],
+    "失智症": ["呆病", "健忘"],
+    "阿茲海默症": ["呆病", "健忘"],
+    "乾眼症": ["白澀症", "目澀"],
+    "口乾": ["消渴"],
+    "貧血": ["血虛"],
+    "骨質疏鬆": ["骨痿", "骨枯"],
+    "潮熱": ["骨蒸"],
+  };
+
+  function expandTerms(raw) {
+    const terms = [{ term: raw, via: null }];
+    const seen = new Set([raw]);
+    for (const [modern, classicalList] of Object.entries(SYNONYM_MAP)) {
+      if (raw.includes(modern)) {
+        classicalList.forEach(c => {
+          if (!seen.has(c)) { terms.push({ term: c, via: modern }); seen.add(c); }
+        });
+      }
+    }
+    return terms;
+  }
+
+  function bigramsOf(s) {
+    const out = [];
+    const arr = [...s];
+    for (let i = 0; i < arr.length - 1; i++) {
+      if (CJK_RE.test(arr[i]) && CJK_RE.test(arr[i + 1])) out.push(arr[i] + arr[i + 1]);
+    }
+    return [...new Set(out)];
+  }
+
   let manifest = [];
   let charIndex = {};
+  let bigramIndex = {};
   let bookCache = new Map(); // bookId -> Promise<paragraphs>
   let manifestById = new Map();
 
@@ -325,7 +403,11 @@
     ]);
     manifest.forEach(m => manifestById.set(m.id, m));
     renderLibrary();
-    els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍`;
+    els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍（下載完整檢索索引中…）`;
+    loadJson(DATA_BASE + "bigramindex.json").then(idx => {
+      bigramIndex = idx;
+      els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍`;
+    });
 
     els.searchBtn.addEventListener("click", () => runSearch());
     els.q.addEventListener("keydown", e => { if (e.key === "Enter") runSearch(); });
@@ -425,17 +507,18 @@
     els.libraryBody.innerHTML = html;
   }
 
-  function getCandidateBooks(chars) {
+  // prefer bigram index (far more selective); fall back to single-char index
+  // only when the term is too short to form a bigram (e.g. a lone character).
+  function getCandidateBooksForTerm(term) {
+    const bg = bigramsOf(term);
+    const index = bg.length ? bigramIndex : charIndex;
+    const keys = bg.length ? bg : [...new Set([...term].filter(ch => CJK_RE.test(ch)))];
     let candidate = null;
-    for (const ch of chars) {
-      const list = charIndex[ch];
+    for (const key of keys) {
+      const list = index[key];
       if (!list) return [];
       const set = new Set(list);
-      if (candidate === null) {
-        candidate = set;
-      } else {
-        candidate = new Set([...candidate].filter(x => set.has(x)));
-      }
+      candidate = candidate === null ? set : new Set([...candidate].filter(x => set.has(x)));
       if (candidate.size === 0) return [];
     }
     return candidate ? [...candidate] : [];
@@ -468,50 +551,83 @@
     els.statusLine.textContent = "比對索引中…";
     els.progressTrack.style.display = "none";
 
-    const candidates = getCandidateBooks(chars);
-    if (candidates.length === 0) {
+    const terms = expandTerms(raw); // [{term, via}], via=null for the literal query
+    const candidatesByTerm = terms.map(t => ({ ...t, books: getCandidateBooksForTerm(t.term) }));
+    const termsByBook = new Map(); // bid -> [{term, via}]
+    candidatesByTerm.forEach(({ term, via, books }) => {
+      books.forEach(bid => {
+        if (!termsByBook.has(bid)) termsByBook.set(bid, []);
+        termsByBook.get(bid).push({ term, via });
+      });
+    });
+
+    if (termsByBook.size === 0) {
       els.statusLine.textContent = "索引中查無符合的典籍";
-      els.resultsWrap.innerHTML = `<div class="empty-state">沒有找到包含這些字的段落，試試更短的關鍵字或不同用詞</div>`;
+      els.resultsWrap.innerHTML = `<div class="empty-state">沒有找到符合的段落，試試更短的關鍵字或不同用詞</div>`;
       els.searchBtn.disabled = false;
       return;
     }
 
-    const toFetch = candidates.slice(0, MAX_BOOKS_FETCH);
+    // smallest books first so the doctor sees the first hits almost instantly,
+    // while larger reference works (e.g. 本草綱目) keep loading in the background
+    let toFetch = [...termsByBook.keys()].sort(
+      (a, b) => (manifestById.get(a).bytes || 0) - (manifestById.get(b).bytes || 0)
+    );
+    const truncated = toFetch.length > MAX_BOOKS_FETCH;
+    toFetch = toFetch.slice(0, MAX_BOOKS_FETCH);
+
     els.progressTrack.style.display = "block";
     els.progressFill.style.width = "0%";
-    let loaded = 0;
-    const bookParas = {};
-    await Promise.all(toFetch.map(async bid => {
-      try {
-        bookParas[bid] = await fetchBook(bid);
-      } catch (e) {
-        bookParas[bid] = [];
-      }
-      loaded++;
-      els.progressFill.style.width = Math.round(loaded / toFetch.length * 100) + "%";
-      els.statusLine.innerHTML = `搜尋中… 已載入 <b>${loaded}/${toFetch.length}</b> 部候選典籍`;
-    }));
+
+    const exactAll = [];
+    const seenKey = new Set();
+    const BATCH = 5;
+    for (let i = 0; i < toFetch.length; i += BATCH) {
+      const batch = toFetch.slice(i, i + BATCH);
+      await Promise.all(batch.map(async bid => {
+        let paras;
+        try { paras = await fetchBook(bid); } catch (e) { paras = []; }
+        const termsForBook = termsByBook.get(bid) || [];
+        paras.forEach((p, paraIdx) => {
+          const [anchorId, chapter, text, formula] = p;
+          for (const { term, via } of termsForBook) {
+            if (text.includes(term)) {
+              const k = bid + ":" + paraIdx;
+              if (!seenKey.has(k)) { seenKey.add(k); exactAll.push({ bid, paraIdx, chapter, text, formula, term, via }); }
+              break;
+            }
+          }
+        });
+      }));
+      const processed = Math.min(i + BATCH, toFetch.length);
+      els.progressFill.style.width = Math.round(processed / toFetch.length * 100) + "%";
+      els.statusLine.innerHTML = `搜尋中… 已比對 <b>${processed}/${toFetch.length}</b> 部候選典籍，目前 <b>${exactAll.length}</b> 筆精確符合`;
+      renderResults(raw, exactAll, [], truncated, true);
+    }
     els.progressTrack.style.display = "none";
 
-    const exact = [];
-    const loose = [];
-    for (const bid of toFetch) {
-      const paras = bookParas[bid] || [];
-      paras.forEach((p, paraIdx) => {
-        const [anchorId, chapter, text, formula] = p;
-        if (text.includes(raw)) {
-          exact.push({ bid, paraIdx, chapter, text, formula });
-        } else if (chars.every(ch => text.includes(ch))) {
-          loose.push({ bid, paraIdx, chapter, text, formula });
-        }
-      });
+    let loose = [];
+    if (exactAll.length < 20) {
+      for (const bid of toFetch) {
+        const paras = await fetchBook(bid);
+        paras.forEach((p, paraIdx) => {
+          if (seenKey.has(bid + ":" + paraIdx)) return;
+          const [anchorId, chapter, text, formula] = p;
+          if (chars.every(ch => text.includes(ch))) loose.push({ bid, paraIdx, chapter, text, formula, term: raw, via: null });
+        });
+      }
     }
 
-    renderResults(raw, exact, loose, candidates.length > toFetch.length);
+    renderResults(raw, exactAll, loose, truncated, false);
     els.searchBtn.disabled = false;
   }
 
-  function renderResults(query, exact, loose, truncatedBooks) {
+  function renderResults(query, exact, loose, truncatedBooks, partial) {
+    if (partial) {
+      if (exact.length === 0) { els.resultsWrap.innerHTML = ""; return; }
+      els.resultsWrap.innerHTML = renderGroup(exact.slice().sort((a, b) => (b.formula - a.formula)).slice(0, MAX_RESULTS), false);
+      return;
+    }
     if (exact.length === 0 && loose.length === 0) {
       els.statusLine.textContent = "查無結果";
       els.resultsWrap.innerHTML = `<div class="empty-state">沒有找到符合的段落，試試更短的關鍵字、單一症狀，或改用同義詞</div>`;
@@ -519,18 +635,21 @@
     }
     els.statusLine.innerHTML = `精確符合 <b>${exact.length}</b> 段${loose.length ? `，相關段落 <b>${loose.length}</b> 段` : ""}${truncatedBooks ? "（候選典籍過多，僅搜尋前 " + MAX_BOOKS_FETCH + " 部，建議縮小關鍵字）" : ""}`;
 
+    // formula hits first — most directly actionable for a doctor
+    const sortedExact = exact.slice().sort((a, b) => (b.formula - a.formula));
+
     let html = "";
-    if (exact.length) {
-      html += renderGroup("精確符合", exact.slice(0, MAX_RESULTS), query, false);
+    if (sortedExact.length) {
+      html += renderGroup(sortedExact.slice(0, MAX_RESULTS), false);
     }
-    if (loose.length && exact.length < 20) {
+    if (loose.length) {
       html += `<div class="section-label">以下為包含相同字詞、但非連續詞組的相關段落</div>`;
-      html += renderGroup("相關段落", loose.slice(0, MAX_RESULTS), query, true);
+      html += renderGroup(loose.slice(0, MAX_RESULTS), true);
     }
     els.resultsWrap.innerHTML = html;
   }
 
-  function renderGroup(label, items, query, isLoose) {
+  function renderGroup(items, isLoose) {
     const byBook = new Map();
     items.forEach(it => {
       if (!byBook.has(it.bid)) byBook.set(it.bid, []);
@@ -544,8 +663,9 @@
         const link = readLink(it.bid, it.paraIdx);
         html += `<div class="result-item ${isLoose ? "loose" : ""}">`;
         if (it.formula) html += `<span class="formula-tag">方劑</span>`;
+        if (it.via) html += `<span class="formula-tag" style="color:var(--accent-strong);border-color:var(--accent-strong);">同義詞：${escapeHtml(it.via)} → ${escapeHtml(it.term)}</span>`;
         if (it.chapter) html += `<div class="chapter">${escapeHtml(it.chapter)}</div>`;
-        html += `<div class="excerpt serif">${isLoose ? escapeHtml(it.text) : highlight(it.text, query)}</div>`;
+        html += `<div class="excerpt serif">${isLoose ? escapeHtml(it.text) : highlight(it.text, it.term)}</div>`;
         html += `<a class="go-link" href="${link}">查看原文段落 →</a>`;
         html += `</div>`;
       });
