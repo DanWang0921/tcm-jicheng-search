@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中醫古籍檢索</title>
+<style>
+  :root {
+    --bg: #E9E7DD;
+    --surface: #FAF9F4;
+    --surface-2: #DEDBCD;
+    --border: #C7C2AE;
+    --text: #23241F;
+    --text-muted: #5B5B4F;
+    --text-faint: #8A8474;
+    --accent: #2B4570;
+    --accent-strong: #1B2E4D;
+    --accent-wash: rgba(43,69,112,0.08);
+    --seal: #A63A2E;
+    --seal-wash: rgba(166,58,46,0.10);
+    --shadow: 0 1px 2px rgba(35,36,31,0.06), 0 8px 24px -12px rgba(35,36,31,0.22);
+    --radius: 10px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141922; --surface: #1C232E; --surface-2: #242D3A; --border: #34404F;
+      --text: #E8E6DC; --text-muted: #9AA3AE; --text-faint: #626E7C;
+      --accent: #7C9CC9; --accent-strong: #A8C2E3; --accent-wash: rgba(124,156,201,0.14);
+      --seal: #D97B68; --seal-wash: rgba(217,123,104,0.14);
+      --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px -12px rgba(0,0,0,0.55);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141922; --surface: #1C232E; --surface-2: #242D3A; --border: #34404F;
+    --text: #E8E6DC; --text-muted: #9AA3AE; --text-faint: #626E7C;
+    --accent: #7C9CC9; --accent-strong: #A8C2E3; --accent-wash: rgba(124,156,201,0.14);
+    --seal: #D97B68; --seal-wash: rgba(217,123,104,0.14);
+    --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px -12px rgba(0,0,0,0.55);
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #E9E7DD; --surface: #FAF9F4; --surface-2: #DEDBCD; --border: #C7C2AE;
+    --text: #23241F; --text-muted: #5B5B4F; --text-faint: #8A8474;
+    --accent: #2B4570; --accent-strong: #1B2E4D; --accent-wash: rgba(43,69,112,0.08);
+    --seal: #A63A2E; --seal-wash: rgba(166,58,46,0.10);
+    --shadow: 0 1px 2px rgba(35,36,31,0.06), 0 8px 24px -12px rgba(35,36,31,0.22);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .serif { font-family: "Songti TC", "STSong", "PMingLiU", "Noto Serif TC", serif; }
+  .mono { font-family: ui-monospace, "SF Mono", "Roboto Mono", monospace; font-variant-numeric: tabular-nums; }
+  a { color: var(--accent-strong); }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 28px 20px 64px; }
+
+  .hero { text-align: center; margin-bottom: 22px; }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--text-faint); margin-bottom: 6px;
+  }
+  .hero h1 {
+    font-size: clamp(24px, 4vw, 32px);
+    margin: 0 0 8px;
+    font-weight: 700;
+    text-wrap: balance;
+  }
+  .hero p { font-size: 13px; color: var(--text-muted); max-width: 56ch; margin: 0 auto; }
+  .hero p a { color: var(--text-muted); text-decoration-color: var(--border); }
+
+  .search-box {
+    display: flex; gap: 8px; margin: 22px 0 6px;
+    background: var(--surface); border: 1.5px solid var(--border); border-radius: 12px;
+    padding: 6px 6px 6px 16px; box-shadow: var(--shadow);
+  }
+  .search-box input {
+    flex: 1; border: none; background: none; outline: none;
+    font-size: 17px; color: var(--text); font-family: inherit;
+    padding: 10px 0;
+  }
+  .search-box input::placeholder { color: var(--text-faint); }
+  .search-box button {
+    font: inherit; font-size: 14px; font-weight: 600;
+    background: var(--accent); color: var(--surface);
+    border: none; border-radius: 8px; padding: 0 20px;
+    cursor: pointer;
+  }
+  .search-box button:hover { background: var(--accent-strong); }
+  .search-box button:disabled { opacity: 0.5; cursor: default; }
+
+  .hint-row {
+    display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 2px 0;
+    font-size: 12px; color: var(--text-faint);
+  }
+  .hint-row .example {
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px;
+    cursor: pointer; background: var(--surface);
+  }
+  .hint-row .example:hover { border-color: var(--accent); color: var(--accent-strong); }
+
+  .status-line {
+    margin: 18px 2px 8px; font-size: 12.5px; color: var(--text-muted); min-height: 18px;
+  }
+  .status-line b { color: var(--text); font-family: ui-monospace, monospace; }
+  .progress-track {
+    height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin: 6px 2px 0;
+  }
+  .progress-fill { height: 100%; background: var(--accent); transition: width 0.15s; }
+
+  .results { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
+  .result-group {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .result-group .book-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+  }
+  .result-group .book-head .title { font-weight: 700; font-size: 14.5px; }
+  .result-group .book-head .cat { font-size: 11px; color: var(--text-faint); }
+  .result-item {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .result-item:last-child { border-bottom: none; }
+  .result-item .chapter { font-size: 11px; color: var(--text-faint); }
+  .result-item .excerpt {
+    font-size: 15px; line-height: 1.9;
+  }
+  .result-item .excerpt mark {
+    background: var(--seal-wash); color: var(--seal); font-weight: 700; border-radius: 3px; padding: 0 1px;
+  }
+  .result-item .formula-tag {
+    display: inline-block; font-size: 10.5px; color: var(--seal); border: 1px solid var(--seal);
+    border-radius: 999px; padding: 1px 8px; margin-bottom: 4px; width: fit-content;
+  }
+  .result-item .go-link {
+    font-size: 12px; color: var(--accent-strong); text-decoration: none; margin-top: 2px;
+  }
+  .result-item .go-link:hover { text-decoration: underline; }
+  .result-item.loose { opacity: 0.92; }
+
+  .section-label {
+    font-size: 12px; color: var(--text-faint); margin: 22px 2px 4px; letter-spacing: 0.04em;
+  }
+
+  .empty-state {
+    text-align: center; padding: 40px 16px; color: var(--text-faint); font-size: 13.5px;
+  }
+
+  details.library { margin-top: 34px; }
+  details.library summary {
+    cursor: pointer; font-size: 13px; color: var(--text-muted); padding: 8px 2px;
+    list-style: none;
+  }
+  details.library summary::-webkit-details-marker { display: none; }
+  details.library summary::before { content: "▸ "; color: var(--text-faint); }
+  details.library[open] summary::before { content: "▾ "; }
+  .lib-cat { margin-top: 12px; }
+  .lib-cat h3 { font-size: 12px; color: var(--text-faint); font-weight: 600; margin: 0 0 6px; }
+  .lib-books { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lib-books a {
+    font-size: 12.5px; border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px;
+    text-decoration: none; color: var(--text-muted); background: var(--surface);
+  }
+  .lib-books a:hover { border-color: var(--accent); color: var(--accent-strong); }
+
+  footer {
+    margin-top: 30px; font-size: 11.5px; color: var(--text-faint); text-align: center; line-height: 1.8;
+  }
+  footer a { color: var(--text-muted); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="eyebrow">中醫古籍全文檢索 · 笈成書藏</div>
+    <h1 class="serif">中醫古籍檢索</h1>
+    <p>收錄內經、傷寒金匱、溫病、本草、方劑、醫案醫論等 73 部核心典籍，共 21 萬餘段原文。輸入症狀描述或方劑名稱，直接跳轉到<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>原書對應段落。</p>
+  </div>
+
+  <div class="search-box">
+    <input type="text" id="q" placeholder="例如：大黃蟅蟲丸、肌膚甲錯、五勞虛極羸瘦…" autofocus>
+    <button id="searchBtn">查詢</button>
+  </div>
+  <div class="hint-row" id="hintRow">
+    <span>試試：</span>
+    <span class="example">大黃蟅蟲丸</span>
+    <span class="example">肌膚甲錯</span>
+    <span class="example">怕冷手腳冰冷</span>
+    <span class="example">咳嗽痰多</span>
+    <span class="example">崩漏</span>
+  </div>
+
+  <div class="status-line" id="statusLine"></div>
+  <div class="progress-track" id="progressTrack" style="display:none;"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+  <div id="resultsWrap"></div>
+
+  <details class="library" id="libraryDetails">
+    <summary>瀏覽收錄書目（73 部）</summary>
+    <div id="libraryBody"></div>
+  </details>
+
+  <footer>
+    原文與段落連結來自<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>，本工具僅建立檢索索引並連回原書，不重製全文內容。<br>
+    目前收錄常用核心典籍，非全站 1,362 部書，若常查的書不在其中歡迎回報再加入。<br>
+    段落連結使用瀏覽器「文字片段跳轉」技術，Chrome／Edge／Safari 17.4+ 可自動定位並標示原文，舊版瀏覽器會開到書籍首頁。
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const DATA_BASE = "data/";
+  const BOOK_BASE = "https://jicheng.tw/tcm/book/";
+  const CJK_RE = /[㐀-鿿豈-﫿]/;
+  const MAX_RESULTS = 250;
+  const MAX_BOOKS_FETCH = 40;
+  // common modern/simplified variant -> classical form used in these editions
+  const VARIANT_MAP = { "蟅": "䗪", "术": "朮", "芪": "耆", "曲": "麴", "泻": "瀉" };
+  function normalizeQuery(s) {
+    return [...s].map(ch => VARIANT_MAP[ch] || ch).join("");
+  }
+
+  let manifest = [];
+  let charIndex = {};
+  let bookCache = new Map(); // bookId -> Promise<paragraphs>
+  let manifestById = new Map();
+
+  const els = {
+    q: document.getElementById("q"),
+    searchBtn: document.getElementById("searchBtn"),
+    statusLine: document.getElementById("statusLine"),
+    progressTrack: document.getElementById("progressTrack"),
+    progressFill: document.getElementById("progressFill"),
+    resultsWrap: document.getElementById("resultsWrap"),
+    hintRow: document.getElementById("hintRow"),
+    libraryBody: document.getElementById("libraryBody"),
+  };
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  async function loadJson(path) {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error("fetch failed: " + path);
+    return res.json();
+  }
+
+  async function init() {
+    [manifest, charIndex] = await Promise.all([
+      loadJson(DATA_BASE + "manifest.json"),
+      loadJson(DATA_BASE + "charindex.json"),
+    ]);
+    manifest.forEach(m => manifestById.set(m.id, m));
+    renderLibrary();
+    els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍`;
+
+    els.searchBtn.addEventListener("click", () => runSearch());
+    els.q.addEventListener("keydown", e => { if (e.key === "Enter") runSearch(); });
+    document.querySelectorAll(".hint-row .example").forEach(el => {
+      el.addEventListener("click", () => { els.q.value = el.textContent; runSearch(); });
+    });
+  }
+
+  function renderLibrary() {
+    const byCat = new Map();
+    manifest.forEach(m => {
+      if (!byCat.has(m.category)) byCat.set(m.category, []);
+      byCat.get(m.category).push(m);
+    });
+    let html = "";
+    for (const [cat, books] of byCat) {
+      html += `<div class="lib-cat"><h3>${escapeHtml(cat)}</h3><div class="lib-books">`;
+      books.forEach(b => {
+        html += `<a href="${BOOK_BASE}${b.path}" target="_blank" rel="noopener">${escapeHtml(b.title)}</a>`;
+      });
+      html += `</div></div>`;
+    }
+    els.libraryBody.innerHTML = html;
+  }
+
+  function getCandidateBooks(chars) {
+    let candidate = null;
+    for (const ch of chars) {
+      const list = charIndex[ch];
+      if (!list) return [];
+      const set = new Set(list);
+      if (candidate === null) {
+        candidate = set;
+      } else {
+        candidate = new Set([...candidate].filter(x => set.has(x)));
+      }
+      if (candidate.size === 0) return [];
+    }
+    return candidate ? [...candidate] : [];
+  }
+
+  function fetchBook(bookId) {
+    if (!bookCache.has(bookId)) {
+      bookCache.set(bookId, loadJson(DATA_BASE + bookId + ".json"));
+    }
+    return bookCache.get(bookId);
+  }
+
+  function highlight(text, query) {
+    const idx = text.indexOf(query);
+    if (idx === -1) return escapeHtml(text);
+    return escapeHtml(text.slice(0, idx)) + "<mark>" + escapeHtml(text.slice(idx, idx + query.length)) + "</mark>" + escapeHtml(text.slice(idx + query.length));
+  }
+
+  function buildLink(path, anchorId, snippet) {
+    const frag = anchorId
+      ? "#" + encodeURIComponent(anchorId) + ":~:text=" + encodeURIComponent(snippet)
+      : "#:~:text=" + encodeURIComponent(snippet);
+    return BOOK_BASE + path + frag;
+  }
+
+  async function runSearch() {
+    const raw = normalizeQuery(els.q.value.trim());
+    if (!raw) return;
+    const chars = [...new Set([...raw].filter(ch => CJK_RE.test(ch)))];
+    if (chars.length === 0) {
+      els.statusLine.textContent = "請輸入中文關鍵字";
+      return;
+    }
+
+    els.searchBtn.disabled = true;
+    els.resultsWrap.innerHTML = "";
+    els.statusLine.textContent = "比對索引中…";
+    els.progressTrack.style.display = "none";
+
+    const candidates = getCandidateBooks(chars);
+    if (candidates.length === 0) {
+      els.statusLine.textContent = "索引中查無符合的典籍";
+      els.resultsWrap.innerHTML = `<div class="empty-state">沒有找到包含這些字的段落，試試更短的關鍵字或不同用詞</div>`;
+      els.searchBtn.disabled = false;
+      return;
+    }
+
+    const toFetch = candidates.slice(0, MAX_BOOKS_FETCH);
+    els.progressTrack.style.display = "block";
+    els.progressFill.style.width = "0%";
+    let loaded = 0;
+    const bookParas = {};
+    await Promise.all(toFetch.map(async bid => {
+      try {
+        bookParas[bid] = await fetchBook(bid);
+      } catch (e) {
+        bookParas[bid] = [];
+      }
+      loaded++;
+      els.progressFill.style.width = Math.round(loaded / toFetch.length * 100) + "%";
+      els.statusLine.innerHTML = `搜尋中… 已載入 <b>${loaded}/${toFetch.length}</b> 部候選典籍`;
+    }));
+    els.progressTrack.style.display = "none";
+
+    const exact = [];
+    const loose = [];
+    for (const bid of toFetch) {
+      const paras = bookParas[bid] || [];
+      for (const [anchorId, chapter, text, formula] of paras) {
+        if (text.includes(raw)) {
+          exact.push({ bid, anchorId, chapter, text, formula });
+        } else if (chars.every(ch => text.includes(ch))) {
+          loose.push({ bid, anchorId, chapter, text, formula });
+        }
+      }
+    }
+
+    renderResults(raw, exact, loose, candidates.length > toFetch.length);
+    els.searchBtn.disabled = false;
+  }
+
+  function renderResults(query, exact, loose, truncatedBooks) {
+    if (exact.length === 0 && loose.length === 0) {
+      els.statusLine.textContent = "查無結果";
+      els.resultsWrap.innerHTML = `<div class="empty-state">沒有找到符合的段落，試試更短的關鍵字、單一症狀，或改用同義詞</div>`;
+      return;
+    }
+    els.statusLine.innerHTML = `精確符合 <b>${exact.length}</b> 段${loose.length ? `，相關段落 <b>${loose.length}</b> 段` : ""}${truncatedBooks ? "（候選典籍過多，僅搜尋前 " + MAX_BOOKS_FETCH + " 部，建議縮小關鍵字）" : ""}`;
+
+    let html = "";
+    if (exact.length) {
+      html += renderGroup("精確符合", exact.slice(0, MAX_RESULTS), query, false);
+    }
+    if (loose.length && exact.length < 20) {
+      html += `<div class="section-label">以下為包含相同字詞、但非連續詞組的相關段落</div>`;
+      html += renderGroup("相關段落", loose.slice(0, MAX_RESULTS), query, true);
+    }
+    els.resultsWrap.innerHTML = html;
+  }
+
+  function renderGroup(label, items, query, isLoose) {
+    const byBook = new Map();
+    items.forEach(it => {
+      if (!byBook.has(it.bid)) byBook.set(it.bid, []);
+      byBook.get(it.bid).push(it);
+    });
+    let html = `<div class="results">`;
+    for (const [bid, its] of byBook) {
+      const m = manifestById.get(bid);
+      html += `<div class="result-group"><div class="book-head"><span class="title serif">${escapeHtml(m.title)}</span><span class="cat">${escapeHtml(m.category)}</span></div>`;
+      its.forEach(it => {
+        const link = buildLink(m.path, it.anchorId, isLoose ? it.text.slice(0, 20) : query);
+        html += `<div class="result-item ${isLoose ? "loose" : ""}">`;
+        if (it.formula) html += `<span class="formula-tag">方劑</span>`;
+        if (it.chapter) html += `<div class="chapter">${escapeHtml(it.chapter)}</div>`;
+        html += `<div class="excerpt serif">${isLoose ? escapeHtml(it.text) : highlight(it.text, query)}</div>`;
+        html += `<a class="go-link" href="${link}" target="_blank" rel="noopener">前往原書段落 →</a>`;
+        html += `</div>`;
+      });
+      html += `</div>`;
+    }
+    html += `</div>`;
+    return html;
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
