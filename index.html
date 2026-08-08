@@ -179,45 +179,95 @@
   }
   footer a { color: var(--text-muted); }
 
+  /* ---- Reader view ---- */
+  .reader-header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 14px 0; border-bottom: 1px solid var(--border); margin-bottom: 18px;
+  }
+  .back-link {
+    font-size: 13px; color: var(--text-muted); text-decoration: none;
+    border: 1px solid var(--border); border-radius: 7px; padding: 5px 12px; background: var(--surface);
+    white-space: nowrap;
+  }
+  .back-link:hover { border-color: var(--accent); color: var(--accent-strong); }
+  .reader-header .rtitle { font-size: 19px; font-weight: 700; }
+  .reader-header .rcat { font-size: 11.5px; color: var(--text-faint); }
+  .reader-header select {
+    margin-left: auto; font: inherit; font-size: 12.5px; color: var(--text-muted);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 5px 8px;
+    max-width: 220px;
+  }
+  .reader-content { font-size: 16.5px; line-height: 2; padding-bottom: 40px; }
+  .reader-chapter {
+    font-size: 15px; font-weight: 700; color: var(--accent-strong);
+    margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px dashed var(--border);
+  }
+  .reader-para {
+    margin: 0 0 14px; content-visibility: auto; contain-intrinsic-size: 0 90px;
+    scroll-margin-top: 16px;
+  }
+  .reader-para.formula {
+    background: var(--surface); border-left: 3px solid var(--seal); border-radius: 0 8px 8px 0;
+    padding: 10px 14px; margin: 10px 0;
+  }
+  .reader-para.target { background: var(--seal-wash); border-radius: 8px; padding: 8px 12px; margin: 0 -12px 14px; }
+  .reader-source-note {
+    margin-top: 30px; font-size: 11.5px; color: var(--text-faint); text-align: center; line-height: 1.8;
+  }
+
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="hero">
-    <div class="eyebrow">中醫古籍全文檢索 · 笈成書藏</div>
-    <h1 class="serif">中醫古籍檢索</h1>
-    <p>收錄內經、傷寒金匱、溫病、本草、方劑、醫案醫論等 73 部核心典籍，共 21 萬餘段原文。輸入症狀描述或方劑名稱，直接跳轉到<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>原書對應段落。</p>
+  <div id="searchView">
+    <div class="hero">
+      <div class="eyebrow">中醫古籍全文檢索</div>
+      <h1 class="serif">中醫古籍檢索</h1>
+      <p>收錄內經、傷寒金匱、溫病、本草、方劑、醫案醫論等 73 部核心典籍，共 21 萬餘段原文。輸入症狀描述或方劑名稱，直接在本站閱讀對應段落全文。</p>
+    </div>
+
+    <div class="search-box">
+      <input type="text" id="q" placeholder="例如：大黃蟅蟲丸、肌膚甲錯、五勞虛極羸瘦…" autofocus>
+      <button id="searchBtn">查詢</button>
+    </div>
+    <div class="hint-row" id="hintRow">
+      <span>試試：</span>
+      <span class="example">大黃蟅蟲丸</span>
+      <span class="example">肌膚甲錯</span>
+      <span class="example">怕冷手腳冰冷</span>
+      <span class="example">咳嗽痰多</span>
+      <span class="example">崩漏</span>
+    </div>
+
+    <div class="status-line" id="statusLine"></div>
+    <div class="progress-track" id="progressTrack" style="display:none;"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+    <div id="resultsWrap"></div>
+
+    <details class="library" id="libraryDetails">
+      <summary>瀏覽收錄書目（73 部）</summary>
+      <div id="libraryBody"></div>
+    </details>
+
+    <footer>
+      收錄常用核心典籍，非全站 1,362 部書，若常查的書不在其中歡迎回報再加入。<br>
+      原文整理參考自<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>數位典藏。
+    </footer>
   </div>
 
-  <div class="search-box">
-    <input type="text" id="q" placeholder="例如：大黃蟅蟲丸、肌膚甲錯、五勞虛極羸瘦…" autofocus>
-    <button id="searchBtn">查詢</button>
+  <div id="readerView" style="display:none;">
+    <div class="reader-header">
+      <a class="back-link" href="#" id="backLink">← 回搜尋</a>
+      <div>
+        <div class="rtitle serif" id="readerTitle"></div>
+        <div class="rcat" id="readerCat"></div>
+      </div>
+      <select id="chapterJump"></select>
+    </div>
+    <div class="reader-content" id="readerContent"></div>
+    <div class="reader-source-note">原文整理參考自<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>數位典藏。</div>
   </div>
-  <div class="hint-row" id="hintRow">
-    <span>試試：</span>
-    <span class="example">大黃蟅蟲丸</span>
-    <span class="example">肌膚甲錯</span>
-    <span class="example">怕冷手腳冰冷</span>
-    <span class="example">咳嗽痰多</span>
-    <span class="example">崩漏</span>
-  </div>
-
-  <div class="status-line" id="statusLine"></div>
-  <div class="progress-track" id="progressTrack" style="display:none;"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
-
-  <div id="resultsWrap"></div>
-
-  <details class="library" id="libraryDetails">
-    <summary>瀏覽收錄書目（73 部）</summary>
-    <div id="libraryBody"></div>
-  </details>
-
-  <footer>
-    原文與段落連結來自<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>，本工具僅建立檢索索引並連回原書，不重製全文內容。<br>
-    目前收錄常用核心典籍，非全站 1,362 部書，若常查的書不在其中歡迎回報再加入。<br>
-    段落連結使用瀏覽器「文字片段跳轉」技術，Chrome／Edge／Safari 17.4+ 可自動定位並標示原文，舊版瀏覽器會開到書籍首頁。
-  </footer>
 </div>
 
 <script>
@@ -249,6 +299,13 @@
     resultsWrap: document.getElementById("resultsWrap"),
     hintRow: document.getElementById("hintRow"),
     libraryBody: document.getElementById("libraryBody"),
+    searchView: document.getElementById("searchView"),
+    readerView: document.getElementById("readerView"),
+    readerTitle: document.getElementById("readerTitle"),
+    readerCat: document.getElementById("readerCat"),
+    readerContent: document.getElementById("readerContent"),
+    chapterJump: document.getElementById("chapterJump"),
+    backLink: document.getElementById("backLink"),
   };
 
   function escapeHtml(s) {
@@ -275,6 +332,80 @@
     document.querySelectorAll(".hint-row .example").forEach(el => {
       el.addEventListener("click", () => { els.q.value = el.textContent; runSearch(); });
     });
+
+    els.backLink.addEventListener("click", e => {
+      e.preventDefault();
+      if (history.length > 1) history.back();
+      else location.hash = "";
+    });
+    window.addEventListener("hashchange", applyRoute);
+    applyRoute();
+  }
+
+  function parseHash() {
+    const m = /^#\/read\/(\d+)\/(\d+)$/.exec(location.hash);
+    if (!m) return null;
+    return { bookId: parseInt(m[1], 10), paraIdx: parseInt(m[2], 10) };
+  }
+
+  function readLink(bookId, paraIdx) {
+    return `#/read/${bookId}/${paraIdx}`;
+  }
+
+  async function applyRoute() {
+    const route = parseHash();
+    if (!route || !manifestById.has(route.bookId)) {
+      els.readerView.style.display = "none";
+      els.searchView.style.display = "block";
+      return;
+    }
+    els.searchView.style.display = "none";
+    els.readerView.style.display = "block";
+    await showReader(route.bookId, route.paraIdx);
+  }
+
+  async function showReader(bookId, paraIdx) {
+    const m = manifestById.get(bookId);
+    els.readerTitle.textContent = m.title;
+    els.readerCat.textContent = m.category;
+    els.readerContent.innerHTML = `<div class="empty-state">載入原文中…</div>`;
+    window.scrollTo({ top: 0 });
+
+    let paras;
+    try {
+      paras = await fetchBook(bookId);
+    } catch (e) {
+      els.readerContent.innerHTML = `<div class="empty-state">原文載入失敗，請重新整理</div>`;
+      return;
+    }
+
+    let html = "";
+    let lastChapter = null;
+    const chapters = [];
+    paras.forEach((p, idx) => {
+      const [anchorId, chapter, text, formula] = p;
+      if (chapter && chapter !== lastChapter) {
+        html += `<div class="reader-chapter" id="c${idx}">${escapeHtml(chapter)}</div>`;
+        chapters.push({ idx, chapter });
+        lastChapter = chapter;
+      }
+      const isTarget = idx === paraIdx;
+      html += `<div class="reader-para${formula ? " formula" : ""}${isTarget ? " target" : ""}" id="p${idx}">${escapeHtml(text)}</div>`;
+    });
+    els.readerContent.innerHTML = html || `<div class="empty-state">此書尚無可顯示的段落</div>`;
+
+    els.chapterJump.innerHTML = `<option value="">跳至章節…</option>` +
+      chapters.map(c => `<option value="${c.idx}">${escapeHtml(c.chapter)}</option>`).join("");
+    els.chapterJump.onchange = () => {
+      if (!els.chapterJump.value) return;
+      const target = document.getElementById("c" + els.chapterJump.value);
+      if (target) target.scrollIntoView({ block: "start" });
+    };
+
+    if (!isNaN(paraIdx)) {
+      const target = document.getElementById("p" + paraIdx);
+      if (target) target.scrollIntoView({ block: "center" });
+    }
   }
 
   function renderLibrary() {
@@ -287,7 +418,7 @@
     for (const [cat, books] of byCat) {
       html += `<div class="lib-cat"><h3>${escapeHtml(cat)}</h3><div class="lib-books">`;
       books.forEach(b => {
-        html += `<a href="${BOOK_BASE}${b.path}" target="_blank" rel="noopener">${escapeHtml(b.title)}</a>`;
+        html += `<a href="${readLink(b.id, 0)}">${escapeHtml(b.title)}</a>`;
       });
       html += `</div></div>`;
     }
@@ -321,13 +452,6 @@
     const idx = text.indexOf(query);
     if (idx === -1) return escapeHtml(text);
     return escapeHtml(text.slice(0, idx)) + "<mark>" + escapeHtml(text.slice(idx, idx + query.length)) + "</mark>" + escapeHtml(text.slice(idx + query.length));
-  }
-
-  function buildLink(path, anchorId, snippet) {
-    const frag = anchorId
-      ? "#" + encodeURIComponent(anchorId) + ":~:text=" + encodeURIComponent(snippet)
-      : "#:~:text=" + encodeURIComponent(snippet);
-    return BOOK_BASE + path + frag;
   }
 
   async function runSearch() {
@@ -373,13 +497,14 @@
     const loose = [];
     for (const bid of toFetch) {
       const paras = bookParas[bid] || [];
-      for (const [anchorId, chapter, text, formula] of paras) {
+      paras.forEach((p, paraIdx) => {
+        const [anchorId, chapter, text, formula] = p;
         if (text.includes(raw)) {
-          exact.push({ bid, anchorId, chapter, text, formula });
+          exact.push({ bid, paraIdx, chapter, text, formula });
         } else if (chars.every(ch => text.includes(ch))) {
-          loose.push({ bid, anchorId, chapter, text, formula });
+          loose.push({ bid, paraIdx, chapter, text, formula });
         }
-      }
+      });
     }
 
     renderResults(raw, exact, loose, candidates.length > toFetch.length);
@@ -416,12 +541,12 @@
       const m = manifestById.get(bid);
       html += `<div class="result-group"><div class="book-head"><span class="title serif">${escapeHtml(m.title)}</span><span class="cat">${escapeHtml(m.category)}</span></div>`;
       its.forEach(it => {
-        const link = buildLink(m.path, it.anchorId, isLoose ? it.text.slice(0, 20) : query);
+        const link = readLink(it.bid, it.paraIdx);
         html += `<div class="result-item ${isLoose ? "loose" : ""}">`;
         if (it.formula) html += `<span class="formula-tag">方劑</span>`;
         if (it.chapter) html += `<div class="chapter">${escapeHtml(it.chapter)}</div>`;
         html += `<div class="excerpt serif">${isLoose ? escapeHtml(it.text) : highlight(it.text, query)}</div>`;
-        html += `<a class="go-link" href="${link}" target="_blank" rel="noopener">前往原書段落 →</a>`;
+        html += `<a class="go-link" href="${link}">查看原文段落 →</a>`;
         html += `</div>`;
       });
       html += `</div>`;
