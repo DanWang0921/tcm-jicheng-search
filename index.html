@@ -400,6 +400,27 @@
     return res.json();
   }
 
+  // Cache Storage persists across page loads (much larger quota than
+  // localStorage, which can't reliably hold the ~14MB bigram index), so a
+  // returning visitor skips the multi-MB index download entirely.
+  const CACHE_NAME = "tcm-jicheng-search-v1";
+  async function loadJsonCached(path) {
+    if (!("caches" in window)) return loadJson(path);
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      const hit = await cache.match(path);
+      if (hit) return hit.json();
+      const res = await fetch(path);
+      if (res.ok) cache.put(path, res.clone());
+      return res.json();
+    } catch (e) {
+      return loadJson(path);
+    }
+  }
+
+  let bigramIndexReady = null; // Promise, resolves once bigramIndex is safe to query
+  let bigramIndexLoaded = false;
+
   async function init() {
     [manifest, charIndex] = await Promise.all([
       loadJson(DATA_BASE + "manifest.json"),
@@ -408,8 +429,9 @@
     manifest.forEach(m => manifestById.set(m.id, m));
     renderLibrary();
     els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍（下載完整檢索索引中…）`;
-    loadJson(DATA_BASE + "bigramindex.json").then(idx => {
+    bigramIndexReady = loadJsonCached(DATA_BASE + "bigramindex.json").then(idx => {
       bigramIndex = idx;
+      bigramIndexLoaded = true;
       els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍`;
     });
 
@@ -555,6 +577,11 @@
     els.statusLine.textContent = "比對索引中…";
     els.progressTrack.style.display = "none";
 
+    if (!bigramIndexLoaded && bigramIndexReady) {
+      els.statusLine.textContent = "首次載入檢索索引中…（之後查詢會直接使用瀏覽器快取，不用再等）";
+      await bigramIndexReady;
+    }
+
     const terms = expandTerms(raw); // [{term, via}], via=null for the literal query
     const candidatesByTerm = terms.map(t => ({ ...t, books: getCandidateBooksForTerm(t.term) }));
     const termsByBook = new Map(); // bid -> [{term, via}]
@@ -585,29 +612,40 @@
 
     const exactAll = [];
     const seenKey = new Set();
-    const BATCH = 5;
-    for (let i = 0; i < toFetch.length; i += BATCH) {
-      const batch = toFetch.slice(i, i + BATCH);
-      await Promise.all(batch.map(async bid => {
-        let paras;
-        try { paras = await fetchBook(bid); } catch (e) { paras = []; }
-        const termsForBook = termsByBook.get(bid) || [];
-        paras.forEach((p, paraIdx) => {
-          const [anchorId, chapter, text, formula] = p;
-          for (const { term, via } of termsForBook) {
-            if (text.includes(term)) {
-              const k = bid + ":" + paraIdx;
-              if (!seenKey.has(k)) { seenKey.add(k); exactAll.push({ bid, paraIdx, chapter, text, formula, term, via }); }
-              break;
-            }
-          }
-        });
-      }));
-      const processed = Math.min(i + BATCH, toFetch.length);
-      els.progressFill.style.width = Math.round(processed / toFetch.length * 100) + "%";
-      els.statusLine.innerHTML = `搜尋中… 已比對 <b>${processed}/${toFetch.length}</b> 部候選典籍，目前 <b>${exactAll.length}</b> 筆精確符合`;
-      renderResults(raw, exactAll, [], truncated, true);
+    let processed = 0;
+    let renderQueued = false;
+    function queueRender() {
+      if (renderQueued) return;
+      renderQueued = true;
+      requestAnimationFrame(() => {
+        renderQueued = false;
+        els.progressFill.style.width = Math.round(processed / toFetch.length * 100) + "%";
+        els.statusLine.innerHTML = `搜尋中… 已比對 <b>${processed}/${toFetch.length}</b> 部候選典籍，目前 <b>${exactAll.length}</b> 筆精確符合`;
+        renderResults(raw, exactAll, [], truncated, true);
+      });
     }
+
+    // fire every candidate book fetch at once (browsers multiplex these over
+    // HTTP/2) instead of waiting on fixed groups — each book's matches land
+    // and render the moment that book resolves, so small/fast books never
+    // wait behind whichever book in an arbitrary batch is slowest.
+    await Promise.all(toFetch.map(async bid => {
+      let paras;
+      try { paras = await fetchBook(bid); } catch (e) { paras = []; }
+      const termsForBook = termsByBook.get(bid) || [];
+      paras.forEach((p, paraIdx) => {
+        const [anchorId, chapter, text, formula] = p;
+        for (const { term, via } of termsForBook) {
+          if (text.includes(term)) {
+            const k = bid + ":" + paraIdx;
+            if (!seenKey.has(k)) { seenKey.add(k); exactAll.push({ bid, paraIdx, chapter, text, formula, term, via }); }
+            break;
+          }
+        }
+      });
+      processed++;
+      queueRender();
+    }));
     els.progressTrack.style.display = "none";
 
     let loose = [];
