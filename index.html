@@ -224,7 +224,7 @@
     <div class="hero">
       <div class="eyebrow">中醫古籍全文檢索</div>
       <h1 class="serif">中醫古籍檢索</h1>
-      <p>收錄內經、傷寒金匱、溫病、本草、方劑、醫案醫論等 73 部核心典籍，共 21 萬餘段原文。輸入症狀描述或方劑名稱，直接在本站閱讀對應段落全文；現代病名（如「焦慮」「更年期」）會自動對照古籍病名一併查詢。</p>
+      <p>收錄笈成書藏全站 1,268 部典籍（內經、傷寒金匱、溫病、本草、方劑、醫案醫論、婦兒外科、針灸等全類別），共 175 萬餘段原文。輸入症狀描述或方劑名稱，直接在本站閱讀對應段落全文；現代病名（如「焦慮」「更年期」）會自動對照古籍病名一併查詢。</p>
     </div>
 
     <div class="search-box">
@@ -246,12 +246,12 @@
     <div id="resultsWrap"></div>
 
     <details class="library" id="libraryDetails">
-      <summary>瀏覽收錄書目（73 部）</summary>
+      <summary>瀏覽收錄書目（1,268 部，依分類瀏覽）</summary>
       <div id="libraryBody"></div>
     </details>
 
     <footer>
-      收錄常用核心典籍，非全站 1,362 部書，若常查的書不在其中歡迎回報再加入。<br>
+      已收錄笈成書藏全站 1,268 部典籍（原站 1,362 部中，94 部為無內文的目錄／導覽頁，未計入）。<br>
       現代病名對照古籍病名之詞庫僅供輔助搜尋，已對照公開衛教資料做初步核對，非專業審定之標準對照表，實際辨證仍請以專業判斷為準。<br>
       原文整理參考自<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>數位典藏。
     </footer>
@@ -279,7 +279,7 @@
   const BOOK_BASE = "https://jicheng.tw/tcm/book/";
   const CJK_RE = /[㐀-鿿豈-﫿]/;
   const MAX_RESULTS = 250;
-  const MAX_BOOKS_FETCH = 60;
+  const MAX_BOOKS_FETCH = 150;
   // common modern/simplified variant -> classical form used in these editions
   const VARIANT_MAP = { "蟅": "䗪", "术": "朮", "芪": "耆", "曲": "麴", "泻": "瀉" };
   function normalizeQuery(s) {
@@ -371,7 +371,8 @@
 
   let manifest = [];
   let charIndex = {};
-  let bigramIndex = {};
+  let bgShardsAvailable = null; // Set of leading-codepoint hex strings that have a shard file
+  let bgShardCache = new Map(); // codepoint hex -> Promise<{bigram: [bookIds]}>
   let bookCache = new Map(); // bookId -> Promise<paragraphs>
   let manifestById = new Map();
 
@@ -421,22 +422,27 @@
     }
   }
 
-  let bigramIndexReady = null; // Promise, resolves once bigramIndex is safe to query
-  let bigramIndexLoaded = false;
+  // The bigram index is sharded by leading character (one small JSON file
+  // per character) because at full-corpus scale the unsharded index is
+  // ~38MB gzipped — far too large to load upfront. A search only fetches
+  // the shards its own query terms actually touch, typically a few KB to
+  // a few hundred KB total, cached via loadJsonCached for repeat visits.
+  async function loadBgShard(cp) {
+    if (!bgShardCache.has(cp)) {
+      bgShardCache.set(cp, loadJsonCached(DATA_BASE + "bg/" + cp + ".json").catch(() => ({})));
+    }
+    return bgShardCache.get(cp);
+  }
 
   async function init() {
-    [manifest, charIndex] = await Promise.all([
+    [manifest, charIndex, bgShardsAvailable] = await Promise.all([
       loadJson(DATA_BASE + "manifest.json"),
       loadJson(DATA_BASE + "charindex.json"),
+      loadJson(DATA_BASE + "bgshards.json").then(arr => new Set(arr)),
     ]);
     manifest.forEach(m => manifestById.set(m.id, m));
     renderLibrary();
-    els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍（下載完整檢索索引中…）`;
-    bigramIndexReady = loadJsonCached(DATA_BASE + "bigramindex.json").then(idx => {
-      bigramIndex = idx;
-      bigramIndexLoaded = true;
-      els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍`;
-    });
+    els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍`;
 
     els.searchBtn.addEventListener("click", () => runSearch());
     els.q.addEventListener("keydown", e => { if (e.key === "Enter") runSearch(); });
@@ -538,13 +544,30 @@
 
   // prefer bigram index (far more selective); fall back to single-char index
   // only when the term is too short to form a bigram (e.g. a lone character).
-  function getCandidateBooksForTerm(term) {
+  async function getCandidateBooksForTerm(term) {
     const bg = bigramsOf(term);
-    const index = bg.length ? bigramIndex : charIndex;
-    const keys = bg.length ? bg : [...new Set([...term].filter(ch => CJK_RE.test(ch)))];
+    if (bg.length === 0) {
+      const keys = [...new Set([...term].filter(ch => CJK_RE.test(ch)))];
+      let candidate = null;
+      for (const key of keys) {
+        const list = charIndex[key];
+        if (!list) return [];
+        const set = new Set(list);
+        candidate = candidate === null ? set : new Set([...candidate].filter(x => set.has(x)));
+        if (candidate.size === 0) return [];
+      }
+      return candidate ? [...candidate] : [];
+    }
+
+    const neededCps = [...new Set(bg.map(b => b.codePointAt(0).toString(16)))];
+    if (neededCps.some(cp => !bgShardsAvailable.has(cp))) return []; // a required leading char has zero bigrams anywhere
+    const shards = await Promise.all(neededCps.map(loadBgShard));
+    const shardByCp = new Map(neededCps.map((cp, i) => [cp, shards[i]]));
+
     let candidate = null;
-    for (const key of keys) {
-      const list = index[key];
+    for (const key of bg) {
+      const shard = shardByCp.get(key.codePointAt(0).toString(16)) || {};
+      const list = shard[key];
       if (!list) return [];
       const set = new Set(list);
       candidate = candidate === null ? set : new Set([...candidate].filter(x => set.has(x)));
@@ -580,13 +603,10 @@
     els.statusLine.textContent = "比對索引中…";
     els.progressTrack.style.display = "none";
 
-    if (!bigramIndexLoaded && bigramIndexReady) {
-      els.statusLine.textContent = "首次載入檢索索引中…（之後查詢會直接使用瀏覽器快取，不用再等）";
-      await bigramIndexReady;
-    }
-
     const terms = expandTerms(raw); // [{term, via}], via=null for the literal query
-    const candidatesByTerm = terms.map(t => ({ ...t, books: getCandidateBooksForTerm(t.term) }));
+    const candidatesByTerm = await Promise.all(
+      terms.map(async t => ({ ...t, books: await getCandidateBooksForTerm(t.term) }))
+    );
     const termsByBook = new Map(); // bid -> [{term, via}]
     candidatesByTerm.forEach(({ term, via, books }) => {
       books.forEach(bid => {
