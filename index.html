@@ -298,6 +298,25 @@
     return [...s].map(ch => VARIANT_MAP[ch] || ch).join("");
   }
 
+  // Which book categories to fetch first when a query has more candidates
+  // than we auto-load. File size says nothing about clinical usefulness — a
+  // thin essay can be pure theory while a genuinely useful case-record book
+  // just happens to be large. Case records and formularies are where actual
+  // "pattern → treatment" content concentrates, so they go first regardless
+  // of size; historical/textual-criticism and grab-bag compilations go last.
+  const CATEGORY_PRIORITY = {
+    "醫案類": 0, "醫方類": 0,
+    "傷寒金匱類": 1, "溫病類": 1, "內科": 1, "婦產科": 1, "兒科": 1, "外科": 1, "五官科": 1, "傷科": 1,
+    "醫論醫話隨筆類": 2, "診法類": 2, "針灸經穴類": 2,
+    "醫經類": 3, "本草類": 3, "養生類": 3,
+    "綜合醫書類": 4, "叢書": 4,
+    "醫史考釋類": 5, "其他類": 5, "祝由科": 5,
+  };
+  function categoryPriority(bid) {
+    const cat = manifestById.get(bid).category;
+    return cat in CATEGORY_PRIORITY ? CATEGORY_PRIORITY[cat] : 4;
+  }
+
   // modern symptom/disease name -> classical TCM term(s), used to expand a search
   // beyond the literal query so results aren't limited to modern vocabulary that
   // never appears in classical texts. Spot-checked against public TCM sources
@@ -639,11 +658,14 @@
       return;
     }
 
-    // smallest books first so the doctor sees the first hits almost instantly,
-    // while larger reference works (e.g. 本草綱目) keep loading in the background
-    let toFetch = [...termsByBook.keys()].sort(
-      (a, b) => (manifestById.get(a).bytes || 0) - (manifestById.get(b).bytes || 0)
-    );
+    // clinically-likely categories first (case records, formularies, then
+    // specialty clinical texts); file size only breaks ties within the same
+    // category tier, so "fetched first" tracks usefulness, not just speed
+    let toFetch = [...termsByBook.keys()].sort((a, b) => {
+      const catDiff = categoryPriority(a) - categoryPriority(b);
+      if (catDiff !== 0) return catDiff;
+      return (manifestById.get(a).bytes || 0) - (manifestById.get(b).bytes || 0);
+    });
     const truncated = toFetch.length > MAX_BOOKS_FETCH;
     toFetch = toFetch.slice(0, MAX_BOOKS_FETCH);
 
@@ -701,10 +723,11 @@
       return loose;
     }
 
-    // Auto-fetch only the fastest/smallest slice by default — a broad query
-    // at full-corpus scale can mean 100+ candidate books (~100MB+), which
-    // genuinely takes many seconds to transfer no matter how the index is
-    // built. Show what's fast immediately; leave the long tail opt-in.
+    // Auto-fetch only the highest-priority slice by default (case records
+    // and formularies, per the ordering above) — a broad query at full-corpus
+    // scale can mean 100+ candidate books (~100MB+), which genuinely takes
+    // many seconds to transfer. Show the most clinically useful hits
+    // immediately; leave the rest (theory, materia medica, miscellany) opt-in.
     const firstSlice = toFetch.slice(0, INITIAL_BATCH);
     await matchBooks(firstSlice, toFetch.length);
     els.progressTrack.style.display = "none";
@@ -782,7 +805,7 @@
     let html = sortedExact.length ? renderGroup(sortedExact.slice(0, MAX_RESULTS), false) : `<div class="empty-state">最快的 ${INITIAL_BATCH} 部典籍中沒有精確符合，其餘候選典籍可能有更多結果</div>`;
     html += `<div class="load-more-wrap">
       <button class="load-more-btn" id="loadMoreBtn">顯示更多結果（還有 ${remainingCount} 部候選典籍未查詢）</button>
-      <div class="load-more-hint">其餘典籍檔案較大，載入可能需要數秒到十幾秒</div>
+      <div class="load-more-hint">已優先查詢醫案、方劑等臨床類典籍；其餘（本草、醫經、叢書等）載入可能需要數秒到十幾秒</div>
     </div>`;
     els.resultsWrap.innerHTML = html;
     const btn = document.getElementById("loadMoreBtn");
