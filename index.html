@@ -157,6 +157,17 @@
     text-align: center; padding: 40px 16px; color: var(--text-faint); font-size: 13.5px;
   }
 
+  .load-more-wrap { text-align: center; margin: 18px 0; }
+  .load-more-btn {
+    font: inherit; font-size: 13.5px; font-weight: 600;
+    background: var(--surface); color: var(--accent-strong);
+    border: 1.5px solid var(--accent); border-radius: 999px; padding: 10px 22px;
+    cursor: pointer;
+  }
+  .load-more-btn:hover { background: var(--accent-wash); }
+  .load-more-btn:disabled { opacity: 0.5; cursor: default; }
+  .load-more-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 6px; }
+
   details.library { margin-top: 34px; }
   details.library summary {
     cursor: pointer; font-size: 13px; color: var(--text-muted); padding: 8px 2px;
@@ -280,6 +291,7 @@
   const CJK_RE = /[㐀-鿿豈-﫿]/;
   const MAX_RESULTS = 250;
   const MAX_BOOKS_FETCH = 150;
+  const INITIAL_BATCH = 40; // auto-fetched on every search; rest is opt-in via "load more"
   // common modern/simplified variant -> classical form used in these editions
   const VARIANT_MAP = { "蟅": "䗪", "术": "朮", "芪": "耆", "曲": "麴", "泻": "瀉" };
   function normalizeQuery(s) {
@@ -589,6 +601,10 @@
     return escapeHtml(text.slice(0, idx)) + "<mark>" + escapeHtml(text.slice(idx, idx + query.length)) + "</mark>" + escapeHtml(text.slice(idx + query.length));
   }
 
+  // Guards against a stale "load more"/render callback from a previous
+  // search clobbering the results of a newer one the user has since started.
+  let searchGeneration = 0;
+
   async function runSearch() {
     const raw = normalizeQuery(els.q.value.trim());
     if (!raw) return;
@@ -598,6 +614,7 @@
       return;
     }
 
+    const myGen = ++searchGeneration;
     els.searchBtn.disabled = true;
     els.resultsWrap.innerHTML = "";
     els.statusLine.textContent = "比對索引中…";
@@ -637,43 +654,43 @@
     const seenKey = new Set();
     let processed = 0;
     let renderQueued = false;
-    function queueRender() {
+    function queueRender(total) {
       if (renderQueued) return;
       renderQueued = true;
       requestAnimationFrame(() => {
         renderQueued = false;
-        els.progressFill.style.width = Math.round(processed / toFetch.length * 100) + "%";
-        els.statusLine.innerHTML = `搜尋中… 已比對 <b>${processed}/${toFetch.length}</b> 部候選典籍，目前 <b>${exactAll.length}</b> 筆精確符合`;
+        if (myGen !== searchGeneration) return;
+        els.progressFill.style.width = Math.round(processed / total * 100) + "%";
+        els.statusLine.innerHTML = `搜尋中… 已比對 <b>${processed}/${total}</b> 部候選典籍，目前 <b>${exactAll.length}</b> 筆精確符合`;
         renderResults(raw, exactAll, [], truncated, true);
       });
     }
 
-    // fire every candidate book fetch at once (browsers multiplex these over
-    // HTTP/2) instead of waiting on fixed groups — each book's matches land
-    // and render the moment that book resolves, so small/fast books never
-    // wait behind whichever book in an arbitrary batch is slowest.
-    await Promise.all(toFetch.map(async bid => {
-      let paras;
-      try { paras = await fetchBook(bid); } catch (e) { paras = []; }
-      const termsForBook = termsByBook.get(bid) || [];
-      paras.forEach((p, paraIdx) => {
-        const [anchorId, chapter, text, formula] = p;
-        for (const { term, via } of termsForBook) {
-          if (text.includes(term)) {
-            const k = bid + ":" + paraIdx;
-            if (!seenKey.has(k)) { seenKey.add(k); exactAll.push({ bid, paraIdx, chapter, text, formula, term, via }); }
-            break;
+    // fetch+match a set of books concurrently (browsers multiplex these over
+    // HTTP/2), rendering each match the moment its book resolves.
+    async function matchBooks(bookIds, total) {
+      await Promise.all(bookIds.map(async bid => {
+        let paras;
+        try { paras = await fetchBook(bid); } catch (e) { paras = []; }
+        const termsForBook = termsByBook.get(bid) || [];
+        paras.forEach((p, paraIdx) => {
+          const [anchorId, chapter, text, formula] = p;
+          for (const { term, via } of termsForBook) {
+            if (text.includes(term)) {
+              const k = bid + ":" + paraIdx;
+              if (!seenKey.has(k)) { seenKey.add(k); exactAll.push({ bid, paraIdx, chapter, text, formula, term, via }); }
+              break;
+            }
           }
-        }
-      });
-      processed++;
-      queueRender();
-    }));
-    els.progressTrack.style.display = "none";
+        });
+        processed++;
+        queueRender(total);
+      }));
+    }
 
-    let loose = [];
-    if (exactAll.length < 20) {
-      for (const bid of toFetch) {
+    async function computeLoose() {
+      const loose = [];
+      for (const bid of toFetch.slice(0, processed)) {
         const paras = await fetchBook(bid);
         paras.forEach((p, paraIdx) => {
           if (seenKey.has(bid + ":" + paraIdx)) return;
@@ -681,9 +698,36 @@
           if (chars.every(ch => text.includes(ch))) loose.push({ bid, paraIdx, chapter, text, formula, term: raw, via: null });
         });
       }
+      return loose;
     }
 
-    renderResults(raw, exactAll, loose, truncated, false);
+    // Auto-fetch only the fastest/smallest slice by default — a broad query
+    // at full-corpus scale can mean 100+ candidate books (~100MB+), which
+    // genuinely takes many seconds to transfer no matter how the index is
+    // built. Show what's fast immediately; leave the long tail opt-in.
+    const firstSlice = toFetch.slice(0, INITIAL_BATCH);
+    await matchBooks(firstSlice, toFetch.length);
+    els.progressTrack.style.display = "none";
+    if (myGen !== searchGeneration) return;
+
+    if (toFetch.length <= INITIAL_BATCH) {
+      const loose = exactAll.length < 20 ? await computeLoose() : [];
+      if (myGen !== searchGeneration) return;
+      renderResults(raw, exactAll, loose, truncated, false);
+      els.searchBtn.disabled = false;
+      return;
+    }
+
+    renderLoadMoreState(raw, exactAll, toFetch.length - processed, async () => {
+      const rest = toFetch.slice(processed);
+      els.progressTrack.style.display = "block";
+      await matchBooks(rest, toFetch.length);
+      els.progressTrack.style.display = "none";
+      const loose = exactAll.length < 20 ? await computeLoose() : [];
+      if (myGen !== searchGeneration) return;
+      renderResults(raw, exactAll, loose, truncated, false);
+      els.searchBtn.disabled = false;
+    });
     els.searchBtn.disabled = false;
   }
 
@@ -730,6 +774,23 @@
       html += renderGroup(loose.slice(0, MAX_RESULTS), true);
     }
     els.resultsWrap.innerHTML = html;
+  }
+
+  function renderLoadMoreState(query, exact, remainingCount, onLoadMore) {
+    els.statusLine.innerHTML = `已找到 <b>${exact.length}</b> 筆精確符合（最快的 ${INITIAL_BATCH} 部典籍）`;
+    const sortedExact = rankExact(exact);
+    let html = sortedExact.length ? renderGroup(sortedExact.slice(0, MAX_RESULTS), false) : `<div class="empty-state">最快的 ${INITIAL_BATCH} 部典籍中沒有精確符合，其餘候選典籍可能有更多結果</div>`;
+    html += `<div class="load-more-wrap">
+      <button class="load-more-btn" id="loadMoreBtn">顯示更多結果（還有 ${remainingCount} 部候選典籍未查詢）</button>
+      <div class="load-more-hint">其餘典籍檔案較大，載入可能需要數秒到十幾秒</div>
+    </div>`;
+    els.resultsWrap.innerHTML = html;
+    const btn = document.getElementById("loadMoreBtn");
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "載入中…";
+      await onLoadMore();
+    });
   }
 
   function renderGroup(items, isLoose) {
