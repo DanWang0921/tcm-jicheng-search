@@ -256,6 +256,20 @@
   }
 
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  @media (max-width: 480px) {
+    .wrap { padding: 20px 14px 48px; }
+    .hint-row .example, .filter-cats label, .lib-books a {
+      padding: 8px 12px; font-size: 13px;
+    }
+    .filter-cats label { flex: 1 1 calc(50% - 6px); justify-content: space-between; }
+    .search-box button { padding: 0 16px; }
+    .result-group .book-head { flex-wrap: wrap; row-gap: 4px; }
+    .result-group .book-head .title { min-width: 0; overflow-wrap: anywhere; }
+    .reader-header { gap: 10px; }
+    .reader-header select { margin-left: 0; max-width: none; width: 100%; }
+    .reader-header .rtitle { font-size: 17px; }
+  }
 </style>
 </head>
 <body>
@@ -304,7 +318,8 @@
     <footer>
       已收錄笈成書藏全站 1,268 部典籍（原站 1,362 部中，94 部為無內文的目錄／導覽頁，未計入）。<br>
       現代病名對照古籍病名之詞庫僅供輔助搜尋，已對照公開衛教資料做初步核對，非專業審定之標準對照表，實際辨證仍請以專業判斷為準。<br>
-      原文整理參考自<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>數位典藏。
+      原文整理參考自<a href="https://jicheng.tw/tcm/book/index.html" target="_blank" rel="noopener">笈成書藏</a>數位典藏。依該站<a href="https://jicheng.tw/tcm/copyright.html" target="_blank" rel="noopener">著作權聲明</a>，公眾領域典籍之篩選、標點、編排成果以<a href="https://creativecommons.org/publicdomain/zero/1.0/deed.zh_TW" target="_blank" rel="noopener">CC0</a>釋出，該站自行創作之文本以<a href="https://creativecommons.org/licenses/by/4.0/deed.zh_TW" target="_blank" rel="noopener">CC BY 4.0</a>授權；本站僅提供檢索介面與技術服務，不對笈成書藏之資料主張任何專屬著作權。<br>
+      本站內容僅供學術研究與典籍檢索參考，不構成醫療診斷、用藥或治療建議，實際醫療行為請諮詢合格中醫師。
     </footer>
   </div>
 
