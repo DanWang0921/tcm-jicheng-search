@@ -107,6 +107,35 @@
   }
   .hint-row .example:hover { border-color: var(--accent); color: var(--accent-strong); }
 
+  .filter-row { margin: 10px 2px 0; }
+  .filter-toggle-btn {
+    font: inherit; font-size: 12.5px; color: var(--text-muted);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 12px; cursor: pointer;
+  }
+  .filter-toggle-btn:hover { border-color: var(--accent); color: var(--accent-strong); }
+  .filter-toggle-btn.active { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-wash); }
+  .filter-panel {
+    margin-top: 8px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+  }
+  .filter-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .filter-head span { font-size: 12px; color: var(--text-faint); }
+  .filter-clear-btn {
+    font: inherit; font-size: 11.5px; color: var(--text-muted); background: none;
+    border: none; cursor: pointer; text-decoration: underline;
+  }
+  .filter-clear-btn:hover { color: var(--accent-strong); }
+  .filter-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+  .filter-cats label {
+    display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 7px; padding: 4px 9px; cursor: pointer; background: var(--surface);
+  }
+  .filter-cats label:hover { border-color: var(--accent); }
+  .filter-cats label.checked { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-wash); }
+  .filter-cats input { accent-color: var(--accent); margin: 0; }
+  .filter-cats .n { color: var(--text-faint); font-family: ui-monospace, monospace; font-size: 11px; }
+
   .status-line {
     margin: 18px 2px 8px; font-size: 12.5px; color: var(--text-muted); min-height: 18px;
   }
@@ -249,6 +278,17 @@
       <span class="example">自律神經失調</span>
       <span class="example">焦慮</span>
       <span class="example">更年期</span>
+    </div>
+
+    <div class="filter-row">
+      <button type="button" class="filter-toggle-btn" id="filterToggleBtn">進階篩選 ▾</button>
+      <div class="filter-panel" id="filterPanel" style="display:none;">
+        <div class="filter-head">
+          <span>分類</span>
+          <button type="button" class="filter-clear-btn" id="filterClearBtn">清除篩選</button>
+        </div>
+        <div class="filter-cats" id="filterCats"></div>
+      </div>
     </div>
 
     <div class="status-line" id="statusLine"></div>
@@ -423,7 +463,13 @@
     readerContent: document.getElementById("readerContent"),
     chapterJump: document.getElementById("chapterJump"),
     backLink: document.getElementById("backLink"),
+    filterToggleBtn: document.getElementById("filterToggleBtn"),
+    filterPanel: document.getElementById("filterPanel"),
+    filterCats: document.getElementById("filterCats"),
+    filterClearBtn: document.getElementById("filterClearBtn"),
   };
+
+  let selectedCategories = new Set();
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -473,12 +519,24 @@
     ]);
     manifest.forEach(m => manifestById.set(m.id, m));
     renderLibrary();
+    renderFilterPanel();
     els.statusLine.textContent = `索引就緒：${manifest.length} 部典籍`;
 
     els.searchBtn.addEventListener("click", () => runSearch());
     els.q.addEventListener("keydown", e => { if (e.key === "Enter") runSearch(); });
     document.querySelectorAll(".hint-row .example").forEach(el => {
       el.addEventListener("click", () => { els.q.value = el.textContent; runSearch(); });
+    });
+
+    els.filterToggleBtn.addEventListener("click", () => {
+      const open = els.filterPanel.style.display !== "none";
+      els.filterPanel.style.display = open ? "none" : "block";
+    });
+    els.filterClearBtn.addEventListener("click", () => {
+      selectedCategories.clear();
+      renderFilterPanel();
+      updateFilterToggleLabel();
+      if (els.q.value.trim()) runSearch();
     });
 
     els.backLink.addEventListener("click", e => {
@@ -554,6 +612,34 @@
       const target = document.getElementById("p" + paraIdx);
       if (target) target.scrollIntoView({ block: "center" });
     }
+  }
+
+  function updateFilterToggleLabel() {
+    const n = selectedCategories.size;
+    els.filterToggleBtn.textContent = n > 0 ? `進階篩選（已選 ${n}）▾` : "進階篩選 ▾";
+    els.filterToggleBtn.classList.toggle("active", n > 0);
+  }
+
+  function renderFilterPanel() {
+    const counts = new Map();
+    manifest.forEach(m => counts.set(m.category, (counts.get(m.category) || 0) + 1));
+    const cats = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    els.filterCats.innerHTML = cats.map(([cat, n]) => {
+      const checked = selectedCategories.has(cat);
+      return `<label class="${checked ? "checked" : ""}">` +
+        `<input type="checkbox" value="${escapeHtml(cat)}" ${checked ? "checked" : ""}>` +
+        `${escapeHtml(cat)} <span class="n">${n}</span></label>`;
+    }).join("");
+    els.filterCats.querySelectorAll("input").forEach(cb => {
+      cb.addEventListener("change", () => {
+        if (cb.checked) selectedCategories.add(cb.value);
+        else selectedCategories.delete(cb.value);
+        cb.closest("label").classList.toggle("checked", cb.checked);
+        updateFilterToggleLabel();
+        if (els.q.value.trim()) runSearch();
+      });
+    });
+    updateFilterToggleLabel();
   }
 
   function renderLibrary() {
@@ -651,8 +737,16 @@
       });
     });
 
+    if (selectedCategories.size > 0) {
+      for (const bid of [...termsByBook.keys()]) {
+        if (!selectedCategories.has(manifestById.get(bid).category)) termsByBook.delete(bid);
+      }
+    }
+
     if (termsByBook.size === 0) {
-      els.statusLine.textContent = "索引中查無符合的典籍";
+      els.statusLine.textContent = selectedCategories.size > 0
+        ? "所選分類中查無符合的典籍，試試清除篩選或更換分類"
+        : "索引中查無符合的典籍";
       els.resultsWrap.innerHTML = `<div class="empty-state">沒有找到符合的段落，試試更短的關鍵字或不同用詞</div>`;
       els.searchBtn.disabled = false;
       return;
@@ -676,12 +770,18 @@
     const seenKey = new Set();
     let processed = 0;
     let renderQueued = false;
+    // Guards against a requestAnimationFrame callback queued by the very last
+    // book in a batch firing *after* matchBooks()'s own await already resolved
+    // and moved the UI past the "searching" phase (e.g. into the load-more
+    // state) — without this flag, that late frame overwrites the newer UI with
+    // stale "搜尋中…" progress text and clobbers the load-more button.
+    let acceptProgress = true;
     function queueRender(total) {
       if (renderQueued) return;
       renderQueued = true;
       requestAnimationFrame(() => {
         renderQueued = false;
-        if (myGen !== searchGeneration) return;
+        if (myGen !== searchGeneration || !acceptProgress) return;
         els.progressFill.style.width = Math.round(processed / total * 100) + "%";
         els.statusLine.innerHTML = `搜尋中… 已比對 <b>${processed}/${total}</b> 部候選典籍，目前 <b>${exactAll.length}</b> 筆精確符合`;
         renderResults(raw, exactAll, [], truncated, true);
@@ -730,6 +830,7 @@
     // immediately; leave the rest (theory, materia medica, miscellany) opt-in.
     const firstSlice = toFetch.slice(0, INITIAL_BATCH);
     await matchBooks(firstSlice, toFetch.length);
+    acceptProgress = false;
     els.progressTrack.style.display = "none";
     if (myGen !== searchGeneration) return;
 
@@ -742,9 +843,11 @@
     }
 
     renderLoadMoreState(raw, exactAll, toFetch.length - processed, async () => {
+      acceptProgress = true;
       const rest = toFetch.slice(processed);
       els.progressTrack.style.display = "block";
       await matchBooks(rest, toFetch.length);
+      acceptProgress = false;
       els.progressTrack.style.display = "none";
       const loose = exactAll.length < 20 ? await computeLoose() : [];
       if (myGen !== searchGeneration) return;
