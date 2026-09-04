@@ -278,7 +278,7 @@
     <div class="hero">
       <div class="eyebrow">中醫古籍全文檢索</div>
       <h1 class="serif">中醫古籍檢索</h1>
-      <p>收錄笈成書藏全站 1,268 部典籍（內經、傷寒金匱、溫病、本草、方劑、醫案醫論、婦兒外科、針灸等全類別），共 175 萬餘段原文。輸入症狀描述或方劑名稱，直接在本站閱讀對應段落全文；現代病名（如「焦慮」「更年期」）會自動對照古籍病名一併查詢。</p>
+      <p>收錄笈成書藏全站 1,268 部典籍（內經、傷寒金匱、溫病、本草、方劑、醫案醫論、婦兒外科、針灸等全類別），共 175 萬餘段原文。輸入症狀描述或方劑名稱，直接在本站閱讀對應段落全文；現代病名（如「焦慮」「更年期」）會自動對照古籍病名一併查詢。可用空格、頓號或逗號分隔多個關鍵字（例如「消水腫 五苓散 豬苓湯」），系統會找出同時包含這些詞的典籍。</p>
     </div>
 
     <div class="search-box">
@@ -292,6 +292,7 @@
       <span class="example">自律神經失調</span>
       <span class="example">焦慮</span>
       <span class="example">更年期</span>
+      <span class="example">消水腫 五苓散 豬苓湯</span>
     </div>
 
     <div class="filter-row">
@@ -347,6 +348,10 @@
   const MAX_RESULTS = 250;
   const MAX_BOOKS_FETCH = 150;
   const INITIAL_BATCH = 40; // auto-fetched on every search; rest is opt-in via "load more"
+  // splits a query into separate AND keywords when the user separates them with
+  // spaces, 頓號 (、), or commas — e.g. "消水腫 五苓散 豬苓湯" -> three keywords
+  // that must all appear in a book for it to qualify (combined/multi-keyword query)
+  const MULTI_TERM_SPLIT_RE = /[\s\u3000、，,]+/;
   // common modern/simplified variant -> classical form used in these editions
   const VARIANT_MAP = { "蟅": "䗪", "术": "朮", "芪": "耆", "曲": "麴", "泻": "瀉" };
   function normalizeQuery(s) {
@@ -740,17 +745,40 @@
     els.statusLine.textContent = "比對索引中…";
     els.progressTrack.style.display = "none";
 
-    const terms = expandTerms(raw); // [{term, via}], via=null for the literal query
+    // Multi-keyword AND: "消水腫 五苓散 豬苓湯" (space/頓號/逗號 separated) means
+    // find books that contain ALL of these keywords, not the literal 7-character
+    // phrase with a space in the middle (which would never appear in any text —
+    // this was why such queries previously returned nothing). Synonym expansion
+    // is skipped in this mode: the user has already broken their idea into
+    // explicit keywords, so we search each one literally.
+    const subTerms = [...new Set(raw.split(MULTI_TERM_SPLIT_RE).map(t => t.trim()).filter(Boolean))];
+    const isMultiTerm = subTerms.length > 1;
+
+    const terms = isMultiTerm ? subTerms.map(t => ({ term: t, via: null })) : expandTerms(raw); // [{term, via}], via=null for the literal query
     const candidatesByTerm = await Promise.all(
       terms.map(async t => ({ ...t, books: await getCandidateBooksForTerm(t.term) }))
     );
     const termsByBook = new Map(); // bid -> [{term, via}]
-    candidatesByTerm.forEach(({ term, via, books }) => {
-      books.forEach(bid => {
-        if (!termsByBook.has(bid)) termsByBook.set(bid, []);
-        termsByBook.get(bid).push({ term, via });
+    if (isMultiTerm) {
+      // AND across sub-terms: only keep books whose bigram index indicates they
+      // might contain every sub-term. Intersect starting from the rarest term
+      // (fewest candidate books) so the running set shrinks as fast as possible.
+      const sorted = [...candidatesByTerm].sort((a, b) => a.books.length - b.books.length);
+      let candidateSet = new Set(sorted[0] ? sorted[0].books : []);
+      for (let i = 1; i < sorted.length; i++) {
+        const s = new Set(sorted[i].books);
+        candidateSet = new Set([...candidateSet].filter(x => s.has(x)));
+        if (candidateSet.size === 0) break;
+      }
+      candidateSet.forEach(bid => termsByBook.set(bid, terms.map(t => ({ term: t.term, via: null }))));
+    } else {
+      candidatesByTerm.forEach(({ term, via, books }) => {
+        books.forEach(bid => {
+          if (!termsByBook.has(bid)) termsByBook.set(bid, []);
+          termsByBook.get(bid).push({ term, via });
+        });
       });
-    });
+    }
 
     if (selectedCategories.size > 0) {
       for (const bid of [...termsByBook.keys()]) {
@@ -810,16 +838,38 @@
         let paras;
         try { paras = await fetchBook(bid); } catch (e) { paras = []; }
         const termsForBook = termsByBook.get(bid) || [];
-        paras.forEach((p, paraIdx) => {
-          const [anchorId, chapter, text, formula] = p;
-          for (const { term, via } of termsForBook) {
-            if (text.includes(term)) {
-              const k = bid + ":" + paraIdx;
-              if (!seenKey.has(k)) { seenKey.add(k); exactAll.push({ bid, paraIdx, chapter, text, formula, term, via }); }
-              break;
-            }
+        if (isMultiTerm) {
+          // Book-level AND: this book only qualifies if every sub-term appears
+          // *somewhere* in it (not necessarily the same paragraph) — matching
+          // "系統會找出同時包含這些詞的典籍". Collect per-term matches in one
+          // pass, then only keep them if every sub-term had at least one hit.
+          const matchesByTerm = new Map();
+          termsForBook.forEach(({ term }) => matchesByTerm.set(term, []));
+          paras.forEach((p, paraIdx) => {
+            const [anchorId, chapter, text, formula] = p;
+            termsForBook.forEach(({ term, via }) => {
+              if (text.includes(term)) matchesByTerm.get(term).push({ paraIdx, chapter, text, formula, term, via });
+            });
+          });
+          const allPresent = [...matchesByTerm.values()].every(arr => arr.length > 0);
+          if (allPresent) {
+            matchesByTerm.forEach(arr => arr.forEach(rec => {
+              const k = bid + ":" + rec.paraIdx;
+              if (!seenKey.has(k)) { seenKey.add(k); exactAll.push({ bid, ...rec }); }
+            }));
           }
-        });
+        } else {
+          paras.forEach((p, paraIdx) => {
+            const [anchorId, chapter, text, formula] = p;
+            for (const { term, via } of termsForBook) {
+              if (text.includes(term)) {
+                const k = bid + ":" + paraIdx;
+                if (!seenKey.has(k)) { seenKey.add(k); exactAll.push({ bid, paraIdx, chapter, text, formula, term, via }); }
+                break;
+              }
+            }
+          });
+        }
         processed++;
         queueRender(total);
       }));
